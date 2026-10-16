@@ -1,6 +1,5 @@
 ﻿from typing import Any, Dict, List, Optional
-from langchain_core.prompts import ChatPromptTemplate
-from app.langchain_engine.llm_router import get_resilient_llm
+from app.langchain_engine.llm_router import get_resilient_structured_chain
 from app.langchain_engine.schemas import RepoXRayOutput, DependencyAuditOutput
 
 XRAY_SYSTEM_PROMPT = """You are a Staff Software Architect performing an architectural X-Ray of a GitHub repository.
@@ -25,31 +24,26 @@ async def generate_repo_xray(
     user_google_key: Optional[str] = None,
 ) -> RepoXRayOutput:
     """
-    Runs a structured LangChain LCEL pipeline (`prompt | structured_llm`)
-    to produce the full RepoXRayOutput (Mermaid diagram, components, request flow, onboarding).
+    Runs a resilient LangChain LCEL structured pipeline to produce the full RepoXRayOutput
+    (Mermaid diagram, core components, request lifecycle, and contributor onboarding guide).
     """
-    llm = get_resilient_llm(
+    human_template = (
+        "Repository: {full_name}\n"
+        "Description: {description}\n"
+        "Languages: {languages}\n\n"
+        "Clean File Tree ({file_count} files):\n{file_tree}\n\n"
+        "README Excerpt:\n{readme}"
+    )
+
+    chain = get_resilient_structured_chain(
+        system_prompt=XRAY_SYSTEM_PROMPT,
+        human_template=human_template,
+        schema=RepoXRayOutput,
         temperature=0.1,
         user_groq_key=user_groq_key,
         user_google_key=user_google_key,
     )
-    structured_llm = llm.with_structured_output(RepoXRayOutput)
 
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", XRAY_SYSTEM_PROMPT),
-            (
-                "human",
-                "Repository: {full_name}\n"
-                "Description: {description}\n"
-                "Languages: {languages}\n\n"
-                "Clean File Tree ({file_count} files):\n{file_tree}\n\n"
-                "README Excerpt:\n{readme}",
-            ),
-        ]
-    )
-
-    chain = prompt | structured_llm
     result: RepoXRayOutput = await chain.ainvoke(
         {
             "full_name": overview.get("full_name"),
@@ -72,25 +66,20 @@ async def generate_dependency_audit(
     """
     Enriches deterministic OSV.dev CVE findings with architectural categories and remediation advice.
     """
-    llm = get_resilient_llm(
+    human_template = (
+        "Repository: {repo_full_name}\n"
+        "Dependencies & Live OSV.dev CVE Scan Results:\n{deps_json}"
+    )
+
+    chain = get_resilient_structured_chain(
+        system_prompt=DEPS_SYSTEM_PROMPT,
+        human_template=human_template,
+        schema=DependencyAuditOutput,
         temperature=0.1,
         user_groq_key=user_groq_key,
         user_google_key=user_google_key,
     )
-    structured_llm = llm.with_structured_output(DependencyAuditOutput)
 
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", DEPS_SYSTEM_PROMPT),
-            (
-                "human",
-                "Repository: {repo_full_name}\n"
-                "Dependencies & Live OSV.dev CVE Scan Results:\n{deps_json}",
-            ),
-        ]
-    )
-
-    chain = prompt | structured_llm
     return await chain.ainvoke(
         {
             "repo_full_name": repo_full_name,
