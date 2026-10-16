@@ -7,25 +7,27 @@ from langchain.agents.format_scratchpad.tools import format_to_tool_messages
 from langchain.agents.output_parsers.tools import ToolsAgentOutputParser
 from app.services.github_client import GitHubClient
 from app.services.blast_radius import BlastRadiusAnalyzer
-from app.langchain_engine.llm_router import get_resilient_llm_with_tools
+from app.langchain_engine.llm_router import (
+    get_resilient_llm,
+    get_resilient_llm_with_tools,
+)
 
 
 ISSUE_AGENT_SYSTEM_PROMPT = """You are RepoPilot, an autonomous Staff Software Engineer Agent that investigates GitHub repositories and solves open issues.
 
 You have 5 surgical tools bound to repository `{owner}/{repo}` (commit `{commit_sha}`):
-1. `search_files_in_tree(keyword)` — Search ONLY for file paths/names in the repository tree (do NOT pass code snippets here).
-2. `search_inside_file(filepath, code_query)` — Like Ctrl+F inside a file: returns the exact line numbers where a function, class, or variable (`def request`, `class Session`, `merge_cookies`) appears in `filepath`.
-3. `read_code_window(filepath, start_line, end_line)` — Read a 150-line numbered slice of `filepath` around the line numbers you found.
+1. `search_files_in_tree(keyword)` — Search for file paths/names in the repository tree.
+2. `search_inside_file(filepath, code_query)` — Like Ctrl+F inside a specific file: returns the matching line numbers AND 12 lines of surrounding code context.
+3. `read_code_window(filepath, start_line, end_line)` — Read up to 150 numbered lines of `filepath`.
 4. `check_file_blast_radius(filepath)` — Find which other files in the repo import `filepath`.
 5. `read_github_issue(issue_number)` — Fetch the full issue description and maintainer comments.
 
-Strict Efficiency Rules (Complete your investigation in 3-5 tool calls):
-- Always use `search_inside_file` BEFORE `read_code_window` on large files so you jump straight to the exact line number instead of scrolling from line 1.
-- Never pass code like `def request` into `search_files_in_tree` (`search_files_in_tree` only matches file names).
-- Once you have read the target function and checked the blast radius, immediately write your final engineering report covering:
+Strict Efficiency Rules (Complete your investigation in at most 4-5 tool calls):
+- Always pass a full file path (e.g. `src/requests/sessions.py`), never a folder name, to `search_inside_file` and `read_code_window`.
+- As soon as you have inspected the relevant code lines and checked the blast radius, STOP calling tools and write your final engineering report covering:
   1. **Root Cause / Code Flow Analysis** (referencing exact file paths and line numbers)
   2. **Blast Radius & Impacted Files**
-  3. **Step-by-Step Implementation Plan or Code Diff**
+  3. **Step-by-Step Implementation Plan or Unified Code Diff**
 """
 
 
@@ -40,38 +42,53 @@ def build_repo_tools(
 
     @tool
     def search_files_in_tree(keyword: str) -> str:
-        """Search ONLY repository file paths/filenames matching a keyword (e.g., 'sessions', 'auth', 'models'). Pass '' to list top files."""
+        """Search repository file paths/filenames matching a keyword (e.g., 'sessions', 'cookies', 'models'). Pass '' to list all source files."""
         kw = keyword.strip().lower()
         if not kw:
-            return "\n".join(clean_tree[:80])
+            return "\n".join(clean_tree[:100])
         matches = [p for p in clean_tree if kw in p.lower()]
         if not matches:
             return (
-                f"No file paths matched '{keyword}'. Note: this tool searches file names only. "
-                f"To search for code/functions inside a file, use `search_inside_file`."
+                f"No file paths matched '{keyword}'. Here are the main source files in the repo:\n"
+                + "\n".join(clean_tree[:60])
             )
         return "\n".join(matches[:50])
 
     @tool
     async def search_inside_file(filepath: str, code_query: str) -> str:
-        """Search inside a specific file for a function, class, or keyword (e.g., 'def request', 'merge_cookies') and return matching line numbers."""
+        """Search inside a specific file (e.g. 'src/requests/sessions.py') for a function, class, or variable and return matching lines with surrounding code."""
+        if filepath not in clean_tree:
+            matching_files = [p for p in clean_tree if p.startswith(filepath.rstrip("/"))]
+            if matching_files:
+                return (
+                    f"'{filepath}' is a directory, not a file. Choose one of these exact files:\n"
+                    + "\n".join(matching_files[:30])
+                )
+
         content = await gh.get_raw_file(owner, repo, filepath, ref=commit_sha)
         if content is None:
-            return f"Error: File '{filepath}' not found in {owner}/{repo}."
+            return f"Error: File '{filepath}' not found. Valid files include: {clean_tree[:25]}"
 
+        lines = content.splitlines()
         needle = code_query.strip().lower()
-        matches: List[str] = []
-        for idx, line in enumerate(content.splitlines(), 1):
+        snippets: List[str] = []
+
+        for idx, line in enumerate(lines, 1):
             if needle in line.lower():
-                matches.append(f"Line {idx:4d}: {line.strip()}")
-                if len(matches) >= 25:
+                start_ctx = max(1, idx - 3)
+                end_ctx = min(len(lines), idx + 12)
+                ctx_block = "\n".join(
+                    f"{ln:4d} | {lines[ln - 1]}" for ln in range(start_ctx, end_ctx + 1)
+                )
+                snippets.append(
+                    f"Match at Line {idx} (showing lines {start_ctx}-{end_ctx}):\n{ctx_block}"
+                )
+                if len(snippets) >= 6:
                     break
 
-        if not matches:
+        if not snippets:
             return f"No occurrences of '{code_query}' found inside '{filepath}'."
-        return (
-            f"Matches for '{code_query}' in {filepath}:\n" + "\n".join(matches)
-        )
+        return f"Matches for '{code_query}' in {filepath}:\n\n" + "\n\n".join(snippets)
 
     @tool
     async def read_code_window(
@@ -132,8 +149,9 @@ async def run_issue_solver_agent(
     user_google_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Executes the LangChain Tool-Calling Agent with full multi-model fallback support
-    and returns both the final markdown solution and the intermediate tool-call trace.
+    Executes the LangChain Tool-Calling Agent with full multi-model fallback support.
+    Includes a dedicated Synthesizer guarantee so if the agent uses all its tool iterations
+    gathering code, it still synthesizes a complete engineering report from its findings.
     """
     gh = GitHubClient()
     tools = build_repo_tools(gh, owner, repo, commit_sha, clean_tree)
@@ -166,7 +184,7 @@ async def run_issue_solver_agent(
         agent=agent,
         tools=tools,
         verbose=True,
-        max_iterations=10,
+        max_iterations=6,
         return_intermediate_steps=True,
         handle_parsing_errors=True,
     )
@@ -174,16 +192,60 @@ async def run_issue_solver_agent(
     response = await executor.ainvoke({"input": user_query})
 
     tool_trace = []
-    for action, observation in response.get("intermediate_steps", []):
+    collected_evidence = []
+    for idx, (action, observation) in enumerate(response.get("intermediate_steps", []), 1):
+        obs_str = str(observation)
         tool_trace.append(
             {
                 "tool": action.tool,
                 "tool_input": action.tool_input,
-                "observation_preview": str(observation)[:350],
+                "observation_preview": obs_str[:350],
             }
         )
+        collected_evidence.append(
+            f"[Step {idx}: {action.tool}({action.tool_input})]\n{obs_str[:1800]}"
+        )
+
+    final_answer = response.get("output", "")
+
+    # Synthesizer Safety Net: If AgentExecutor hit max_iterations while gathering evidence,
+    # synthesize the final engineering report from all collected tool observations.
+    if not final_answer or "Agent stopped due to max iterations" in final_answer:
+        print("\n>>> Running RepoPilot Synthesizer on collected code evidence...")
+        synth_llm = get_resilient_llm(
+            temperature=0.1,
+            user_groq_key=user_groq_key,
+            user_google_key=user_google_key,
+        )
+        synth_prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are RepoPilot, a Staff Software Engineer. Based on the repository tool evidence "
+                    "collected below, write a comprehensive, well-structured engineering report answering the user's query. "
+                    "Include: 1) Code Flow / Root Cause Analysis (with exact file paths & line numbers), "
+                    "2) Blast Radius / Dependent Files, and 3) Implementation or Usage Summary.",
+                ),
+                (
+                    "human",
+                    "Repository: {owner}/{repo}\n"
+                    "User Query: {query}\n\n"
+                    "Collected Code & Tool Evidence:\n{evidence}",
+                ),
+            ]
+        )
+        synth_chain = synth_prompt | synth_llm
+        synth_msg = await synth_chain.ainvoke(
+            {
+                "owner": owner,
+                "repo": repo,
+                "query": user_query,
+                "evidence": "\n\n".join(collected_evidence),
+            }
+        )
+        final_answer = synth_msg.content if hasattr(synth_msg, "content") else str(synth_msg)
 
     return {
-        "answer": response.get("output", ""),
+        "answer": final_answer,
         "tool_trace": tool_trace,
     }
