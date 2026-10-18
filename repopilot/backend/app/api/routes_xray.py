@@ -39,7 +39,7 @@ async def analyze_repository(
         err_msg = str(e)
         import re
         sanitized = re.sub(r'ghp_[a-zA-Z0-9]+', '[REDACTED_TOKEN]', err_msg)
-        sanitized = re.sub(r'Bearer\s+[^\s'"]+', 'Bearer [REDACTED]', sanitized)
+        sanitized = re.sub(r"Bearer\s+\S+", "Bearer [REDACTED]", sanitized)
         sanitized = re.sub(r'gsk_[a-zA-Z0-9]+', '[REDACTED_GROQ]', sanitized)
         sanitized = re.sub(r'AIza[a-zA-Z0-9_-]+', '[REDACTED_GOOGLE]', sanitized)
         raise HTTPException(status_code=400, detail=f"Failed to fetch repository: {sanitized}")
