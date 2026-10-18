@@ -20,14 +20,13 @@ services:
       - key: GITHUB_TOKEN
         sync: false
 
-  # RepoPilot Vite React Frontend Static Site
+  # RepoPilot Vite React Frontend Static Site (Free by default, no plan attribute)
   - type: web
     name: repopilot-frontend
     env: static
     rootDir: repopilot/frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
-    plan: free
     autoDeploy: true
     routes:
       - type: rewrite
