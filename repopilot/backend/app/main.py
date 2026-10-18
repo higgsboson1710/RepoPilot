@@ -6,11 +6,12 @@ from app.db.database import init_database
 from app.api.routes_xray import router as xray_router
 from app.api.routes_agent import router as agent_router
 from app.api.routes_telemetry import router as telemetry_router
+from app.api.routes_auth import router as auth_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown events: initializes SQLite database and cache tables."""
+    """Startup and shutdown events: initializes SQLite database, users table, and cache tables."""
     init_database()
     yield
 
@@ -32,6 +33,7 @@ app.add_middleware(
 )
 
 # Mount API v1 Routers
+app.include_router(auth_router, prefix="/api/v1", tags=["Authentication (Google & Email)"])
 app.include_router(xray_router, prefix="/api/v1", tags=["Architecture X-Ray & Dependencies"])
 app.include_router(agent_router, prefix="/api/v1", tags=["Issue-to-PR Agent"])
 app.include_router(telemetry_router, prefix="/api/v1", tags=["Telemetry & Resume Stats"])
