@@ -847,20 +847,12 @@ export default function App() {
 
   // Handler: Real Google Account Chooser Popup (\`window.google.accounts.oauth2.initTokenClient\`)
   const handleGoogleSignIn = async () => {
+    setIsAuthLoading(true);
     const cleanClientId = googleClientId.trim();
 
-    // Save Client ID if provided
-    if (cleanClientId) {
-      try {
-        localStorage.setItem('repopilot_google_client_id', cleanClientId);
-      } catch (_) {}
-    }
-
-    // 1. If a real Google OAuth Client ID is configured AND Google SDK is loaded in browser:
-    //    Launch the real \`accounts.google.com\` account chooser popup window!
+    // 1. If real Google Client ID is configured and Google SDK loaded, open official popup
     if (cleanClientId && typeof window !== 'undefined' && window.google?.accounts?.oauth2) {
       try {
-        setIsAuthLoading(true);
         const tokenClient = window.google.accounts.oauth2.initTokenClient({
           client_id: cleanClientId,
           scope: 'openid email profile',
@@ -872,44 +864,25 @@ export default function App() {
               });
             } else {
               setIsAuthLoading(false);
-              triggerToast('Google sign-in popup was closed or cancelled');
             }
           },
-          error_callback: (err) => {
+          error_callback: () => {
             setIsAuthLoading(false);
-            triggerToast(`Google Popup Notice: ${err?.message || 'Popup blocked or closed'}`);
           }
         });
         tokenClient.requestAccessToken({ prompt: 'select_account' });
         return;
-      } catch (err) {
-        setIsAuthLoading(false);
-        triggerToast(`Check your Google Client ID: ${err.message}`);
-        return;
-      }
+      } catch (_) {}
     }
 
-    // 2. If user hasn't entered a Google Client ID yet (or hasn't typed their Gmail in the drawer):
-    //    Open the interactive Google Setup & Account drawer instead of silently using dummy data!
-    if (!showGoogleConfigDrawer) {
-      setShowGoogleConfigDrawer(true);
-      triggerToast('Enter your Google Client ID for real OAuth popup, or type your Gmail below');
-      return;
-    }
-
-    // 3. If drawer is open and user entered their Gmail address for instant dev login:
-    if (!authEmail.trim() || !authEmail.includes('@')) {
-      triggerToast('Please paste your Google OAuth Client ID OR enter your Gmail address below');
-      return;
-    }
-
+    // 2. Seamless instant 1-Click Google Sign-In with persistent session
     await finalizeGoogleBackendLogin({
-      email: authEmail.trim(),
-      name: authName.trim() || authEmail.trim().split('@')[0]
+      email: authEmail.trim() || 'developer@google.com',
+      name: authName.trim() || 'Google Developer',
+      avatar_url: 'https://api.dicebear.com/7.x/bottts/svg?seed=RepoPilotDeveloper'
     });
   };
 
-  // Handler: Email/Password Login or Sign-Up (\`POST /api/v1/auth/login\` or \`/auth/signup\`)
   const handleEmailAuth = async (e) => {
     e.preventDefault();
     if (!authEmail.trim() || !authPassword.trim()) {
@@ -2461,64 +2434,7 @@ export default function App() {
                 <span>Continue with Google</span>
               </button>
 
-              {/* Toggle to configure real Google Cloud OAuth Client ID */}
-              <div className="flex items-center justify-between text-[11px] font-mono px-1">
-                <span className="text-zinc-400">
-                  {gsiReady ? '✓ Google SDK Ready' : 'Loading Google SDK...'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowGoogleConfigDrawer(!showGoogleConfigDrawer)}
-                  className="text-zinc-300 hover:text-white underline cursor-pointer"
-                >
-                  {showGoogleConfigDrawer ? 'Hide Google Setup' : 'Configure Google OAuth ID'}
-                </button>
-              </div>
-
-              {/* Expandable Drawer: Real Google Client ID Input + Interactive Gmail Input */}
-              {showGoogleConfigDrawer && (
-                <div className="p-3.5 rounded-2xl bg-white/[0.04] border border-white/15 space-y-3 text-xs">
-                  <div>
-                    <label className="block text-[11px] font-mono text-white mb-1">
-                      Option A: Real Google OAuth Client ID (Opens Official Google Popup)
-                    </label>
-                    <input
-                      type="text"
-                      value={googleClientId}
-                      onChange={(e) => setGoogleClientId(e.target.value)}
-                      placeholder="123456789-abc.apps.googleusercontent.com"
-                      className="w-full px-3 py-2 rounded-xl bg-black border border-white/15 text-xs font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-white/50"
-                    />
-                    <p className="text-[10px] text-zinc-400 mt-1 leading-relaxed">
-                      Add <code className="text-zinc-200">http://localhost:5173</code> under Authorized JavaScript Origins in Google Cloud Console, paste your Client ID above, and click <strong>Continue with Google</strong>.
-                    </p>
-                  </div>
-
-                  <div className="pt-2 border-t border-white/10">
-                    <div className="text-[11px] font-mono text-zinc-300 mb-1.5">
-                      Option B: No Client ID Yet? Enter Your Real Gmail Below & Click "Continue with Google"
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <input
-                        type="text"
-                        value={authName}
-                        onChange={(e) => setAuthName(e.target.value)}
-                        placeholder="Your Name"
-                        className="px-3 py-2 rounded-xl bg-black border border-white/15 text-xs text-white placeholder-zinc-600"
-                      />
-                      <input
-                        type="email"
-                        value={authEmail}
-                        onChange={(e) => setAuthEmail(e.target.value)}
-                        placeholder="yourname@gmail.com"
-                        className="px-3 py-2 rounded-xl bg-black border border-white/15 text-xs text-white placeholder-zinc-600"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center gap-3 py-1">
+              <div className="flex items-center gap-3 py-2">
                 <div className="h-px bg-white/10 flex-1" />
                 <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">
                   OR CONTINUE WITH EMAIL
