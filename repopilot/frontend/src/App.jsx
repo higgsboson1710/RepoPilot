@@ -565,7 +565,7 @@ function renderEngineeringReport(reportText) {
 
 export default function App() {
   // Backend & API Configuration State
-  const [apiBaseUrl, setApiBaseUrl] = useState('http://localhost:8000/api/v1');
+  const [apiBaseUrl, setApiBaseUrl] = useState(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1');
   const [backendStatus, setBackendStatus] = useState('checking'); // 'online' | 'demo' | 'checking'
   const [keyMode, setKeyMode] = useState('server'); // 'server' (default free tier) | 'custom' (optional personal key)
   const [userGroqKey, setUserGroqKey] = useState('');

@@ -1,0 +1,35 @@
+services:
+  # RepoPilot FastAPI Backend Service
+  - type: web
+    name: repopilot-backend
+    env: python
+    rootDir: repopilot/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: APP_NAME
+        value: "RepoPilot API"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+
+  # RepoPilot Vite React Frontend Static Site
+  - type: web
+    name: repopilot-frontend
+    env: static
+    rootDir: repopilot/frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    plan: free
+    autoDeploy: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
