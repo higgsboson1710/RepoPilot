@@ -30,14 +30,15 @@ class GitHubClient:
 
     def __init__(self, github_token: Optional[str] = None):
         raw_token = github_token or settings.GITHUB_TOKEN or ''
-        token = ''.join(raw_token.split()).strip('"\'')
+        token = ''.join(c for c in raw_token if c.isalnum() or c == '_')
         self.headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "RepoPilot-Agent",
         }
-        if token:
+        if token and token.startswith("ghp_"):
             self.headers["Authorization"] = f"Bearer {token}"
+
     @staticmethod
     def parse_repo_url(repo_url: str) -> Tuple[str, str]:
         """Extracts (owner, repo) from any GitHub URL or 'owner/repo' string."""
