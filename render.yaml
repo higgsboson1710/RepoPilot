@@ -20,7 +20,7 @@ services:
       - key: GITHUB_TOKEN
         sync: false
 
-  # RepoPilot Vite React Frontend Static Site (Free by default, no plan attribute)
+  # RepoPilot Vite React Frontend Static Site
   - type: web
     name: repopilot-frontend
     env: static
@@ -28,6 +28,9 @@ services:
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     autoDeploy: true
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://repopilot-backend-84on.onrender.com/api/v1
     routes:
       - type: rewrite
         source: /*
