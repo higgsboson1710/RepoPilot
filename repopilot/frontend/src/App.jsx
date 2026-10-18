@@ -584,7 +584,7 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
   // Real Google OAuth Client ID State (`accounts.google.com/gsi/client`)
-  const [googleClientId, setGoogleClientId] = useState('');
+  const [googleClientId, setGoogleClientId] = useState(import.meta.env.VITE_GOOGLE_CLIENT_ID || '');
   const [showGoogleConfigDrawer, setShowGoogleConfigDrawer] = useState(false);
   const [gsiReady, setGsiReady] = useState(false);
 
