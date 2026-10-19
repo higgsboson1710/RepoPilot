@@ -1,4 +1,4 @@
-﻿# Virtual Environment
+# Virtual Environment
 .venv/
 venv/
 env/
@@ -7,10 +7,19 @@ env/
 __pycache__/
 *.py[cod]
 
-# Secrets & Database
+# Secrets & Environment Files
 .env
+*.env
+*.env.*
+!.env.example
 *.db
 *.sqlite3
+
+# Node & Frontend Build
+node_modules/
+dist/
+dist-ssr/
+*.local
 
 # IDE
 .vscode/
