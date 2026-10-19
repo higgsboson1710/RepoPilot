@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Terminal,
   ShieldAlert,
@@ -565,7 +565,9 @@ function renderEngineeringReport(reportText) {
 
 export default function App() {
   // Backend & API Configuration State
-  const [apiBaseUrl, setApiBaseUrl] = useState(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1');
+  const [apiBaseUrl, setApiBaseUrl] = useState(
+    import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+  );
   const [backendStatus, setBackendStatus] = useState('checking'); // 'online' | 'demo' | 'checking'
   const [keyMode, setKeyMode] = useState('server'); // 'server' (default free tier) | 'custom' (optional personal key)
   const [userGroqKey, setUserGroqKey] = useState('');
@@ -576,6 +578,7 @@ export default function App() {
 
   // User Authentication State (Real Google OAuth2 Popup + Interactive Google Setup + Email/Password)
   const [currentUser, setCurrentUser] = useState(null);
+  const [authToken, setAuthToken] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authTab, setAuthTab] = useState('login'); // 'login' | 'signup'
   const [authName, setAuthName] = useState('');
@@ -584,7 +587,9 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
   // Real Google OAuth Client ID State (`accounts.google.com/gsi/client`)
-  const [googleClientId, setGoogleClientId] = useState(import.meta.env.VITE_GOOGLE_CLIENT_ID || '');
+  const [googleClientId, setGoogleClientId] = useState(
+    import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+  );
   const [showGoogleConfigDrawer, setShowGoogleConfigDrawer] = useState(false);
   const [gsiReady, setGsiReady] = useState(false);
 
@@ -600,6 +605,7 @@ export default function App() {
 
   // Telemetry Counters (`GET /api/v1/stats`)
   const [telemetry, setTelemetry] = useState({
+    storage_engine: 'postgresql_permanent',
     registered_users: 14,
     total_analyses: 18,
     unique_repos: 6,
@@ -686,11 +692,13 @@ export default function App() {
     try {
       const savedUser = localStorage.getItem('repopilot_user');
       if (savedUser) setCurrentUser(JSON.parse(savedUser));
+      const savedToken = localStorage.getItem('repopilot_token');
+      if (savedToken) setAuthToken(savedToken);
       const savedClientId = localStorage.getItem('repopilot_google_client_id');
       if (savedClientId) setGoogleClientId(savedClientId);
     } catch (_) {}
 
-    // Dynamically load Google Identity Services script (\`https://accounts.google.com/gsi/client\`)
+    // Dynamically load Google Identity Services script (`https://accounts.google.com/gsi/client`)
     if (typeof window !== 'undefined') {
       if (window.google?.accounts) {
         setGsiReady(true);
@@ -712,7 +720,7 @@ export default function App() {
     }
   }, []);
 
-  // Keyboard shortcut \`Cmd+K\` / \`Ctrl+K\` for Command Palette
+  // Keyboard shortcut `Cmd+K` / `Ctrl+K` for Command Palette
   useEffect(() => {
     const onKeyDown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -757,7 +765,7 @@ export default function App() {
     }
   };
 
-  // Check live FastAPI backend connectivity & fetch live \`/api/v1/stats\`
+  // Check live FastAPI backend connectivity & fetch live `/api/v1/stats`
   const checkBackendConnection = async (customBaseUrl = apiBaseUrl) => {
     setBackendStatus('checking');
     try {
@@ -771,6 +779,7 @@ export default function App() {
       if (res.ok) {
         const statsData = await res.json();
         setTelemetry({
+          storage_engine: statsData.storage_engine || 'sqlite_local',
           registered_users: statsData.registered_users ?? 1,
           total_analyses: statsData.total_analyses ?? 0,
           unique_repos: statsData.unique_repos ?? 0,
@@ -793,7 +802,7 @@ export default function App() {
     };
   }, []);
 
-  // Helper: Complete Google login with backend (\`POST /api/v1/auth/google\`)
+  // Helper: Complete Google login with backend (`POST /api/v1/auth/google`)
   const finalizeGoogleBackendLogin = async (payload) => {
     setIsAuthLoading(true);
     try {
@@ -806,8 +815,10 @@ export default function App() {
       if (!res.ok) throw new Error(data.detail || 'Google authentication failed');
 
       setCurrentUser(data.user);
+      if (data.token) setAuthToken(data.token);
       try {
         localStorage.setItem('repopilot_user', JSON.stringify(data.user));
+        if (data.token) localStorage.setItem('repopilot_token', data.token);
       } catch (_) {}
       checkBackendConnection();
       setShowAuthModal(false);
@@ -845,14 +856,22 @@ export default function App() {
     }
   };
 
-  // Handler: Real Google Account Chooser Popup (\`window.google.accounts.oauth2.initTokenClient\`)
+  // Handler: Real Google Account Chooser Popup (`window.google.accounts.oauth2.initTokenClient`)
   const handleGoogleSignIn = async () => {
-    setIsAuthLoading(true);
     const cleanClientId = googleClientId.trim();
 
-    // 1. If real Google Client ID is configured and Google SDK loaded, open official popup
+    // Save Client ID if provided
+    if (cleanClientId) {
+      try {
+        localStorage.setItem('repopilot_google_client_id', cleanClientId);
+      } catch (_) {}
+    }
+
+    // 1. If a real Google OAuth Client ID is configured AND Google SDK is loaded in browser:
+    //    Launch the real `accounts.google.com` account chooser popup window!
     if (cleanClientId && typeof window !== 'undefined' && window.google?.accounts?.oauth2) {
       try {
+        setIsAuthLoading(true);
         const tokenClient = window.google.accounts.oauth2.initTokenClient({
           client_id: cleanClientId,
           scope: 'openid email profile',
@@ -864,25 +883,44 @@ export default function App() {
               });
             } else {
               setIsAuthLoading(false);
+              triggerToast('Google sign-in popup was closed or cancelled');
             }
           },
-          error_callback: () => {
+          error_callback: (err) => {
             setIsAuthLoading(false);
+            triggerToast(`Google Popup Notice: ${err?.message || 'Popup blocked or closed'}`);
           }
         });
         tokenClient.requestAccessToken({ prompt: 'select_account' });
         return;
-      } catch (_) {}
+      } catch (err) {
+        setIsAuthLoading(false);
+        triggerToast(`Check your Google Client ID: ${err.message}`);
+        return;
+      }
     }
 
-    // 2. Seamless instant 1-Click Google Sign-In with persistent session
+    // 2. If user hasn't entered a Google Client ID yet (or hasn't typed their Gmail in the drawer):
+    //    Open the interactive Google Setup & Account drawer instead of silently using dummy data!
+    if (!showGoogleConfigDrawer) {
+      setShowGoogleConfigDrawer(true);
+      triggerToast('Enter your Google Client ID for real OAuth popup, or type your Gmail below');
+      return;
+    }
+
+    // 3. If drawer is open and user entered their Gmail address for instant dev login:
+    if (!authEmail.trim() || !authEmail.includes('@')) {
+      triggerToast('Please paste your Google OAuth Client ID OR enter your Gmail address below');
+      return;
+    }
+
     await finalizeGoogleBackendLogin({
-      email: authEmail.trim() || 'developer@google.com',
-      name: authName.trim() || 'Google Developer',
-      avatar_url: 'https://api.dicebear.com/7.x/bottts/svg?seed=RepoPilotDeveloper'
+      email: authEmail.trim(),
+      name: authName.trim() || authEmail.trim().split('@')[0]
     });
   };
 
+  // Handler: Email/Password Login or Sign-Up (`POST /api/v1/auth/login` or `/auth/signup`)
   const handleEmailAuth = async (e) => {
     e.preventDefault();
     if (!authEmail.trim() || !authPassword.trim()) {
@@ -912,8 +950,10 @@ export default function App() {
         throw new Error(data.detail || 'Authentication error');
       }
       setCurrentUser(data.user);
+      if (data.token) setAuthToken(data.token);
       try {
         localStorage.setItem('repopilot_user', JSON.stringify(data.user));
+        if (data.token) localStorage.setItem('repopilot_token', data.token);
       } catch (_) {}
       checkBackendConnection();
       setShowAuthModal(false);
@@ -949,15 +989,19 @@ export default function App() {
 
   const handleSignOut = () => {
     setCurrentUser(null);
+    setAuthToken('');
     try {
       localStorage.removeItem('repopilot_user');
+      localStorage.removeItem('repopilot_token');
     } catch (_) {}
     triggerToast('Signed out of RepoPilot');
   };
 
-  // Build request headers: only attach custom keys if user switched to 'custom' mode
+  // Build request headers: attach session token + user email for mandatory auth tracking
   const buildHeaders = () => {
     const headers = { 'Content-Type': 'application/json' };
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+    if (currentUser?.email) headers['X-User-Email'] = currentUser.email;
     if (keyMode === 'custom') {
       if (userGroqKey.trim()) headers['X-User-Groq-Key'] = userGroqKey.trim();
       if (userGoogleKey.trim()) headers['X-User-Google-Key'] = userGoogleKey.trim();
@@ -967,6 +1011,11 @@ export default function App() {
 
   // Handler: Run Repository X-Ray + OSV.dev CVE Scan + Load Issues
   const handleAnalyzeRepo = async (targetUrl = repoInput) => {
+    if (!currentUser) {
+      setShowAuthModal(true);
+      triggerToast('Sign in or create an account first so your repository scans are tracked');
+      return;
+    }
     const cleanedUrl = targetUrl.trim();
     if (!cleanedUrl) {
       triggerToast('Enter a valid GitHub repository URL');
@@ -1082,6 +1131,11 @@ export default function App() {
 
   // Handler: Run Issue-to-PR Agent with real-time Server-Sent Events (SSE) stream reader
   const handleRunIssueAgent = async () => {
+    if (!currentUser) {
+      setShowAuthModal(true);
+      triggerToast('Sign in or create an account first to dispatch the Issue-to-PR Agent');
+      return;
+    }
     if (!agentQuery.trim() || isAgentRunning) return;
     if (traceTimerRef.current) clearInterval(traceTimerRef.current);
 
@@ -1485,6 +1539,46 @@ export default function App() {
         ===================================================================== */}
         <section className="max-w-7xl mx-auto px-3 sm:px-6 pt-5 sm:pt-7 pb-4">
           <div className={`${glassCard} p-4 sm:p-6`}>
+            {/* Mandatory Auth Gate & Permanent DB Tracking Strip */}
+            <div className="mb-3.5 pb-3 border-b border-white/[0.08] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              {currentUser ? (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="inline-flex items-center gap-1.5 font-mono text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    AUTHENTICATED SESSION
+                  </span>
+                  <span className="text-zinc-300">
+                    Tracking scans for <strong className="text-white">{currentUser.name}</strong> ({currentUser.email})
+                  </span>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="inline-flex items-center gap-1.5 font-mono text-[11px] px-2.5 py-1 rounded-full bg-white/10 border border-white/25 text-white">
+                    <Lock className="w-3 h-3" />
+                    LOGIN REQUIRED FOR LIVE SCANS
+                  </span>
+                  <span className="text-zinc-400">
+                    Sign in with Google or Email before running X-Ray or Agent dispatches so your account is recorded.
+                  </span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <span className="text-[10px] font-mono uppercase tracking-wider px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/10 text-zinc-300">
+                  DB: {telemetry.storage_engine === 'postgresql_permanent' ? 'POSTGRES PERMANENT' : 'SQLITE LOCAL'}
+                </span>
+                {!currentUser && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthModal(true)}
+                    className="px-3 py-1 rounded-lg bg-white text-black font-semibold text-xs hover:bg-zinc-200 transition cursor-pointer"
+                  >
+                    Sign In / Sign Up
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* Top Command Input Row */}
             <div className="flex flex-col md:flex-row gap-2.5">
               <div className="relative flex-1">
@@ -2434,7 +2528,64 @@ export default function App() {
                 <span>Continue with Google</span>
               </button>
 
-              <div className="flex items-center gap-3 py-2">
+              {/* Toggle to configure real Google Cloud OAuth Client ID */}
+              <div className="flex items-center justify-between text-[11px] font-mono px-1">
+                <span className="text-zinc-400">
+                  {gsiReady ? '✓ Google SDK Ready' : 'Loading Google SDK...'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleConfigDrawer(!showGoogleConfigDrawer)}
+                  className="text-zinc-300 hover:text-white underline cursor-pointer"
+                >
+                  {showGoogleConfigDrawer ? 'Hide Google Setup' : 'Configure Google OAuth ID'}
+                </button>
+              </div>
+
+              {/* Expandable Drawer: Real Google Client ID Input + Interactive Gmail Input */}
+              {showGoogleConfigDrawer && (
+                <div className="p-3.5 rounded-2xl bg-white/[0.04] border border-white/15 space-y-3 text-xs">
+                  <div>
+                    <label className="block text-[11px] font-mono text-white mb-1">
+                      Option A: Real Google OAuth Client ID (Opens Official Google Popup)
+                    </label>
+                    <input
+                      type="text"
+                      value={googleClientId}
+                      onChange={(e) => setGoogleClientId(e.target.value)}
+                      placeholder="123456789-abc.apps.googleusercontent.com"
+                      className="w-full px-3 py-2 rounded-xl bg-black border border-white/15 text-xs font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-white/50"
+                    />
+                    <p className="text-[10px] text-zinc-400 mt-1 leading-relaxed">
+                      Add <code className="text-zinc-200">http://localhost:5173</code> under Authorized JavaScript Origins in Google Cloud Console, paste your Client ID above, and click <strong>Continue with Google</strong>.
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-white/10">
+                    <div className="text-[11px] font-mono text-zinc-300 mb-1.5">
+                      Option B: No Client ID Yet? Enter Your Real Gmail Below & Click "Continue with Google"
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={authName}
+                        onChange={(e) => setAuthName(e.target.value)}
+                        placeholder="Your Name"
+                        className="px-3 py-2 rounded-xl bg-black border border-white/15 text-xs text-white placeholder-zinc-600"
+                      />
+                      <input
+                        type="email"
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        placeholder="yourname@gmail.com"
+                        className="px-3 py-2 rounded-xl bg-black border border-white/15 text-xs text-white placeholder-zinc-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 py-1">
                 <div className="h-px bg-white/10 flex-1" />
                 <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">
                   OR CONTINUE WITH EMAIL
@@ -2765,7 +2916,7 @@ export default function App() {
                 </div>
                 <pre className="font-mono text-[11px] text-zinc-300 overflow-x-auto">
 {`cd repopilot/backend
-.\venv\Scripts\activate
+.venv\\Scripts\\activate
 uvicorn app.main:app --reload --port 8000`}
                 </pre>
               </div>

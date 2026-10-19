@@ -3,9 +3,10 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from app.config import settings
 from app.services.github_client import GitHubClient
 from app.langchain_engine.issue_agent import run_issue_solver_agent
-from app.db.database import increment_issues_solved
+from app.db.database import increment_issues_solved, verify_user_session
 
 router = APIRouter()
 gh = GitHubClient()
@@ -19,14 +20,24 @@ class IssueSolveRequest(BaseModel):
 @router.post("/solve-issue")
 async def solve_issue_stream(
     payload: IssueSolveRequest,
+    authorization: Optional[str] = Header(default=None),
+    x_user_email: Optional[str] = Header(default=None),
     x_user_groq_key: Optional[str] = Header(default=None),
     x_user_google_key: Optional[str] = Header(default=None),
 ):
     """
     POST /api/v1/solve-issue:
-    Executes the LangChain Tool-Calling Agent and streams live Server-Sent Events (SSE)
-    to the frontend so the React UI can display the agent's live tool trace in real time.
+    1. Verifies that the caller is signed in when REQUIRE_AUTH_FOR_SCANS=True.
+    2. Executes the LangChain Tool-Calling Agent and streams live Server-Sent Events (SSE).
+    3. Increments both the global `issues_solved` counter and the logged-in user's personal counter.
     """
+    current_user = verify_user_session(authorization, x_user_email)
+    if settings.REQUIRE_AUTH_FOR_SCANS and not current_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required: Please sign in or create an account to dispatch the Issue-to-PR Agent.",
+        )
+
     try:
         owner, repo = gh.parse_repo_url(payload.repo_url)
         overview = await gh.get_repo_overview(owner, repo)
@@ -34,8 +45,9 @@ async def solve_issue_stream(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    user_id = current_user["id"] if current_user else None
+
     async def event_generator():
-        # Yield initial status event
         yield f"data: {json.dumps({'type': 'status', 'message': f'Initializing agent on {owner}/{repo}...'})}\n\n"
 
         result = await run_issue_solver_agent(
@@ -48,14 +60,11 @@ async def solve_issue_stream(
             user_google_key=x_user_google_key,
         )
 
-        # Stream each tool step to the client
         for idx, step in enumerate(result.get("tool_trace", []), 1):
             yield f"data: {json.dumps({'type': 'tool_step', 'step_number': idx, 'tool': step['tool'], 'input': step['tool_input'], 'preview': step['observation_preview']})}\n\n"
 
-        # Increment telemetry counter
-        increment_issues_solved()
+        increment_issues_solved(user_id=user_id)
 
-        # Yield final completed engineering report
         yield f"data: {json.dumps({'type': 'complete', 'answer': result.get('answer', '')})}\n\n"
 
     return StreamingResponse(

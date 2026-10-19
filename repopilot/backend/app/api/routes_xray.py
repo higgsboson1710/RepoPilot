@@ -1,10 +1,16 @@
 ﻿from typing import Optional
 from fastapi import APIRouter, HTTPException, Header
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
+from app.config import settings
 from app.services.github_client import GitHubClient
 from app.services.osv_scanner import DependencyAndCVEScanner
 from app.langchain_engine.xray_chain import generate_repo_xray, generate_dependency_audit
-from app.db.database import get_cached_repo, save_cached_repo
+from app.db.database import (
+    get_cached_repo,
+    save_cached_repo,
+    verify_user_session,
+    record_user_scan,
+)
 
 router = APIRouter()
 gh = GitHubClient()
@@ -18,15 +24,26 @@ class XRayRequest(BaseModel):
 @router.post("/xray")
 async def analyze_repository(
     payload: XRayRequest,
+    authorization: Optional[str] = Header(default=None),
+    x_user_email: Optional[str] = Header(default=None),
     x_user_groq_key: Optional[str] = Header(default=None),
     x_user_google_key: Optional[str] = Header(default=None),
 ):
     """
     POST /api/v1/xray:
-    1. Checks SQLite Commit-SHA cache first (0 tokens, 50ms latency).
-    2. If miss, fetches clean tree, parses manifest, scans OSV.dev CVEs,
+    1. Verifies that the caller is signed in (Google OAuth or Email/Password) when REQUIRE_AUTH_FOR_SCANS=True.
+    2. Increments the logged-in user's personal `scans_count` in the database.
+    3. Checks Commit-SHA cache first (0 tokens, ~40ms latency).
+    4. If cache miss, fetches clean tree, parses manifest, scans OSV.dev CVEs,
        runs LangChain structured X-Ray pipeline, caches result, and returns.
     """
+    current_user = verify_user_session(authorization, x_user_email)
+    if settings.REQUIRE_AUTH_FOR_SCANS and not current_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required: Please sign in or create an account to analyze repositories.",
+        )
+
     try:
         owner, repo = gh.parse_repo_url(payload.repo_url)
     except ValueError as e:
@@ -36,15 +53,13 @@ async def analyze_repository(
     try:
         overview = await gh.get_repo_overview(owner, repo)
     except Exception as e:
-        err_msg = str(e)
-        import re
-        sanitized = re.sub(r'ghp_[a-zA-Z0-9]+', '[REDACTED_TOKEN]', err_msg)
-        sanitized = re.sub(r"Bearer\s+\S+", "Bearer [REDACTED]", sanitized)
-        sanitized = re.sub(r'gsk_[a-zA-Z0-9]+', '[REDACTED_GROQ]', sanitized)
-        sanitized = re.sub(r'AIza[a-zA-Z0-9_-]+', '[REDACTED_GOOGLE]', sanitized)
-        raise HTTPException(status_code=400, detail=f"Failed to fetch repository: {sanitized}")
+        raise HTTPException(status_code=400, detail=f"Failed to fetch repository: {str(e)}")
 
     commit_sha = overview["latest_commit_sha"]
+
+    # Record scan under this discrete user's profile
+    if current_user:
+        record_user_scan(current_user["id"])
 
     # 0-Token Commit-SHA Cache Check
     cached = get_cached_repo(owner, repo, commit_sha)
@@ -93,7 +108,7 @@ async def analyze_repository(
     deps_dict = deps_audit.model_dump()
     deps_dict["raw_osv_results"] = cve_enriched
 
-    # Save to SQLite Commit-SHA cache for future 0-token instant reads
+    # Save to permanent Commit-SHA cache for future 0-token instant reads
     save_cached_repo(owner, repo, commit_sha, xray_dict, deps_dict)
 
     return {

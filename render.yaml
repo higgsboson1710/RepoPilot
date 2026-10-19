@@ -1,5 +1,4 @@
-services:
-  # RepoPilot FastAPI Backend Service
+﻿services:
   - type: web
     name: repopilot-backend
     env: python
@@ -13,6 +12,10 @@ services:
         value: 3.11.9
       - key: APP_NAME
         value: "RepoPilot API"
+      - key: REQUIRE_AUTH_FOR_SCANS
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
       - key: GROQ_API_KEY
         sync: false
       - key: GOOGLE_API_KEY
@@ -20,7 +23,6 @@ services:
       - key: GITHUB_TOKEN
         sync: false
 
-  # RepoPilot Vite React Frontend Static Site
   - type: web
     name: repopilot-frontend
     env: static
