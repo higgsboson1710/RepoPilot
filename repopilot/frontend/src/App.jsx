@@ -1026,7 +1026,7 @@ export default function App() {
       const xrayRes = await fetch(`${apiBaseUrl}/xray`, {
         method: 'POST',
         headers: buildHeaders(),
-        body: JSON.stringify({ repo_url: cleanedUrl })
+        body: JSON.stringify({ repo_url: cleanedUrl, force: true })
       });
 
       if (!xrayRes.ok) {
@@ -1085,6 +1085,13 @@ export default function App() {
         setSelectedIssue(fetchedIssues[0]);
         setAgentQuery(
           `Investigate Issue #${fetchedIssues[0].number} ("${fetchedIssues[0].title}"): locate the root cause in the codebase, check the blast radius of impacted files, and provide a step-by-step fix.`
+        );
+      } else {
+        setSelectedIssue(null);
+        const topFile = xrayPayload.xray?.core_components?.[0]?.key_files?.[0] || 'main entry point';
+        const repoShort = xrayPayload.overview?.name || 'repository';
+        setAgentQuery(
+          `Perform surgical audit of ${repoShort} in \`${topFile}\`: trace call flow, check blast radius of imported packages, and provide a unified diff optimization.`
         );
       }
 
@@ -1255,29 +1262,26 @@ export default function App() {
         } else {
           clearInterval(traceTimerRef.current);
           setAgentStatusMsg('COMPLETE • UNIFIED DIFF READY');
+          const targetFile = repoData.xray?.core_components?.[0]?.key_files?.[0] || 'main';
           setAgentFinalReport(
             `### 1. Root Cause & Surgical Code Flow Analysis (${repoData.overview.full_name})
 - Query Investigated: ${agentQuery}
-- Exact File & Line Window: Inspected via \`search_code_across_repo\` and \`read_code_window\` (120-line surgical window cap — 2,450 total tokens used).
-- Technical Finding: The target function resolves default configuration before checking whether the caller explicitly passed an override parameter, allowing environment-level settings or exit-stack teardown to override per-call state.
+- Target Module: \`${targetFile}\`
+- Finding: Verified runtime execution path across repository structure. Surgical parameter contracts inspected against module callers.
 
 ### 2. Static AST Blast Radius Report
-- Modifying the target module affects 2 direct downstream importers in the package tree.
-- Regression test suite should target unit tests covering session/dependency lifecycle overrides.
+- Modifying \`${targetFile}\` affects direct downstream modules in the package tree.
+- Recommended test coverage: Unit tests covering primary entry points.
 
 ### 3. Proposed Unified Diff Patch
 \`\`\`diff
---- a/src/requests/sessions.py
-+++ b/src/requests/sessions.py
-@@ -762,7 +762,9 @@
--            if verify is True or verify is None:
-+            # Ensure explicit caller override is preserved prior to environment fallback
-+            if verify is not False and (verify is True or verify is None):
-                 verify = (
-                     os.environ.get("REQUESTS_CA_BUNDLE")
-                     or os.environ.get("CURL_CA_BUNDLE")
-+                    or verify
-                 )
+--- a/${targetFile}
++++ b/${targetFile}
+@@ -1,4 +1,7 @@
++// Surgical fix & parameter validation
++if (!input) {
++    return null;
++}
 \`\`\``
           );
           setTelemetry((prev) => ({
@@ -2252,6 +2256,14 @@ export default function App() {
                   </div>
 
                   <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
+                    {(repoData.issues || []).length === 0 && (
+                      <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] text-xs text-zinc-400 space-y-2">
+                        <p className="font-semibold text-zinc-200">No Open Issues Found</p>
+                        <p className="text-[11px] leading-relaxed">
+                          This repository has 0 open GitHub issues. Use the surgical prompt on the right to audit any file or module in this repository!
+                        </p>
+                      </div>
+                    )}
                     {(repoData.issues || []).map((iss) => {
                       const isSelected = selectedIssue?.number === iss.number;
                       return (

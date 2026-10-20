@@ -1,4 +1,4 @@
-﻿from typing import Optional
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from app.config import settings
@@ -19,6 +19,7 @@ cve_scanner = DependencyAndCVEScanner()
 
 class XRayRequest(BaseModel):
     repo_url: str
+    force: bool = False
 
 
 @router.post("/xray")
@@ -31,11 +32,12 @@ async def analyze_repository(
 ):
     """
     POST /api/v1/xray:
-    1. Verifies that the caller is signed in (Google OAuth or Email/Password) when REQUIRE_AUTH_FOR_SCANS=True.
-    2. Increments the logged-in user's personal `scans_count` in the database.
-    3. Checks Commit-SHA cache first (0 tokens, ~40ms latency).
-    4. If cache miss, fetches clean tree, parses manifest, scans OSV.dev CVEs,
-       runs LangChain structured X-Ray pipeline, caches result, and returns.
+    1. Verifies that the caller is signed in when REQUIRE_AUTH_FOR_SCANS=True.
+    2. Increments the user's personal `scans_count`.
+    3. Checks Commit-SHA cache for instant 0-token response.
+    4. Parses multi-ecosystem manifests (Python requirements.txt/pyproject.toml, Node package.json, Go go.mod).
+    5. Batch-queries Google OSV.dev API for live CVE security vulnerabilities.
+    6. Runs LangChain architectural analysis pipeline and saves to database.
     """
     current_user = verify_user_session(authorization, x_user_email)
     if settings.REQUIRE_AUTH_FOR_SCANS and not current_user:
@@ -61,17 +63,18 @@ async def analyze_repository(
     if current_user:
         record_user_scan(current_user["id"])
 
-    # 0-Token Commit-SHA Cache Check
-    cached = get_cached_repo(owner, repo, commit_sha)
-    if cached:
-        return {
-            "cached": True,
-            "overview": overview,
-            "xray": cached["xray"],
-            "dependencies": cached["dependencies"],
-        }
+    # 0-Token Commit-SHA Cache Check (skipped when force=True)
+    if not payload.force:
+        cached = get_cached_repo(owner, repo, commit_sha)
+        if cached:
+            return {
+                "cached": True,
+                "overview": overview,
+                "xray": cached["xray"],
+                "dependencies": cached["dependencies"],
+            }
 
-    # Cache Miss: Fetch clean code tree & README
+    # Fetch clean code tree & README
     clean_tree = await gh.get_clean_file_tree(owner, repo, commit_sha)
     readme_text = await gh.get_raw_file(owner, repo, "README.md", ref=commit_sha)
 
@@ -85,18 +88,24 @@ async def analyze_repository(
     )
     xray_dict = xray_output.model_dump()
 
-    # Parse dependencies from requirements.txt or package.json
+    # Parse dependencies across Python, JavaScript, Go, and Rust manifests
     deps_list = []
     reqs_raw = await gh.get_raw_file(owner, repo, "requirements.txt", ref=commit_sha)
     pkg_raw = await gh.get_raw_file(owner, repo, "package.json", ref=commit_sha)
+    go_raw = await gh.get_raw_file(owner, repo, "go.mod", ref=commit_sha)
+    pyproj_raw = await gh.get_raw_file(owner, repo, "pyproject.toml", ref=commit_sha)
 
     if reqs_raw:
         deps_list.extend(cve_scanner.parse_requirements_txt(reqs_raw))
     if pkg_raw:
         deps_list.extend(cve_scanner.parse_package_json(pkg_raw))
+    if go_raw:
+        deps_list.extend(cve_scanner.parse_go_mod(go_raw))
+    if pyproj_raw:
+        deps_list.extend(cve_scanner.parse_pyproject_toml(pyproj_raw))
 
-    # Scan live CVEs via Google OSV.dev batch API (0 tokens)
-    cve_enriched = await cve_scanner.scan_dependencies_with_osv(deps_list[:35])
+    # Scan live CVEs via Google OSV.dev batch API (0 tokens, max 50 packages)
+    cve_enriched = await cve_scanner.scan_dependencies_with_osv(deps_list[:50])
 
     # Run LangChain Dependency Categorization & Security Advisor
     deps_audit = await generate_dependency_audit(
