@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter
+from fastapi import APIRouter
 from app.db.database import get_telemetry_stats
 
 router = APIRouter()
@@ -22,3 +22,32 @@ async def get_stats():
         "issues_solved": stats.get("issues_solved", 0),
         "recent_users": stats.get("recent_users", []),
     }
+
+
+@router.get('/test-groq')
+async def test_groq():
+    import httpx, traceback
+    from app.config import settings
+    results = {
+        'settings_groq_key_len': len(settings.GROQ_API_KEY) if settings.GROQ_API_KEY else 0,
+        'settings_groq_prefix': settings.GROQ_API_KEY[:6] if settings.GROQ_API_KEY else '',
+        'settings_google_key_len': len(settings.GOOGLE_API_KEY) if settings.GOOGLE_API_KEY else 0,
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get('https://api.groq.com/openai/v1/models')
+            results['groq_http_status'] = resp.status_code
+    except Exception as e:
+        results['groq_http_error'] = f'{type(e).__name__}: {e}'
+
+    if settings.GROQ_API_KEY:
+        try:
+            from langchain_groq import ChatGroq
+            cg = ChatGroq(model='openai/gpt-oss-120b', api_key=settings.GROQ_API_KEY, timeout=15)
+            ans = await cg.ainvoke('test ping')
+            results['chatgroq_ping'] = ans.content[:40]
+        except Exception as e:
+            results['chatgroq_error'] = f'{type(e).__name__}: {e}'
+
+    return results

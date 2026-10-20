@@ -95,7 +95,7 @@ async def solve_issue_stream(
                 f"```text\n{raw_sample or 'Source file identified in repository tree.'}\n```\n\n"
                 f"### 3. Execution Notes\n"
                 f"- Fast AST tree verification completed.\n"
-                f"- Cloud LLM Agent status: {str(err)[:100]}\n"
+                f"- Cloud LLM Agent status: {type(err).__name__} ({str(err)[:150]})\n"
             )
             yield f"data: {json.dumps({'type': 'complete', 'answer': fallback_answer})}\n\n"
 
