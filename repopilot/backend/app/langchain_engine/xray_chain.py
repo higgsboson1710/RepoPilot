@@ -114,6 +114,24 @@ def build_deterministic_xray(
 
     # Sort groups by size
     sorted_groups = sorted(dir_groups.items(), key=lambda x: len(x[1]), reverse=True)
+    
+    # If all files are in root or only 1 directory exists (flat repo), break down by architectural roles!
+    if len(sorted_groups) <= 1:
+        role_map = {}
+        for f in top_files:
+            lower = f.lower()
+            if lower.endswith((".py", ".go", ".ts", ".js", ".rs", ".java", ".c", ".cpp")):
+                role_map.setdefault("Core Engine", []).append(f)
+            elif lower.endswith((".json", ".yaml", ".yml", ".toml", ".ini", ".conf")):
+                role_map.setdefault("Configuration and Rules", []).append(f)
+            elif lower.endswith((".sh", ".bat", ".ps1", "dockerfile", "makefile")):
+                role_map.setdefault("Deployment and Scripts", []).append(f)
+            else:
+                role_map.setdefault("Documentation and Assets", []).append(f)
+        # Sort so Core Engine is first
+        priority = {"Core Engine": 0, "Configuration and Rules": 1, "Deployment and Scripts": 2, "Documentation and Assets": 3}
+        sorted_groups = sorted(role_map.items(), key=lambda x: priority.get(x[0], 9))
+
     if len(sorted_groups) > 5:
         sorted_groups = sorted_groups[:5]
 
@@ -123,7 +141,7 @@ def build_deterministic_xray(
     for idx, (group_name, files) in enumerate(sorted_groups, 1):
         clean_label = group_name.replace("/", " ").replace("_", " ").title()
         mod_id = f"M{idx}"
-        clean_name = f"{clean_label} Module"
+        clean_name = f"{clean_label} Module" if not group_name.endswith("Module") else clean_label
         components.append(
             ComponentNode(
                 name=clean_name,
@@ -143,16 +161,22 @@ def build_deterministic_xray(
         )
         node_tokens.append({"id": "Core", "label": "Application Engine"})
 
-    # Build dynamic directed execution topology graph
+    # Build dynamic directed execution topology graph (always guaranteed rich and connected!)
     diagram_lines = ["graph TD"]
-    for i in range(len(node_tokens) - 1):
-        curr = node_tokens[i]
-        nxt = node_tokens[i + 1]
-        diagram_lines.append(f"    {curr['id']}[{curr['label']}] --> {nxt['id']}[{nxt['label']}]")
-
-    if len(node_tokens) >= 3:
-        # Add feedback or cross-cutting link
-        diagram_lines.append(f"    {node_tokens[0]['id']} --> {node_tokens[2]['id']}[{node_tokens[2]['label']}]")
+    if len(node_tokens) >= 2:
+        diagram_lines.append(f"    UserClient[User / Trigger Client] --> {node_tokens[0]['id']}[{node_tokens[0]['label']}]")
+        for i in range(len(node_tokens) - 1):
+            curr = node_tokens[i]
+            nxt = node_tokens[i + 1]
+            diagram_lines.append(f"    {curr['id']}[{curr['label']}] --> {nxt['id']}[{nxt['label']}]")
+        if len(node_tokens) >= 3:
+            diagram_lines.append(f"    {node_tokens[0]['id']} --> {node_tokens[2]['id']}[{node_tokens[2]['label']}]")
+    else:
+        main_lbl = node_tokens[0]['label'] if node_tokens else f"{repo_name} Core Engine"
+        diagram_lines.extend([
+            f"    UserClient[User / Trigger Client] --> CoreNode[{main_lbl}]",
+            f"    CoreNode --> OutputPipeline[Output Processing and State Engine]",
+        ])
 
     first_file = top_files[0] if top_files else "main entry file"
 

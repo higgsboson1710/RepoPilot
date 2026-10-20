@@ -19,6 +19,7 @@ def get_candidate_llms(
 
     models: List[BaseChatModel] = []
 
+    # Groq candidates prioritized first for high throughput (6000 req/min)
     if groq_key:
         for groq_model_id in (
             "openai/gpt-oss-120b",
@@ -31,16 +32,19 @@ def get_candidate_llms(
                     api_key=groq_key,
                     temperature=temperature,
                     max_retries=1,
+                    request_timeout=25.0,
                 )
             )
 
+    # Gemini candidate: set max_retries=0 and timeout=10.0 to fail-fast on 429 quota rather than hanging 600s
     if google_key:
         models.append(
             ChatGoogleGenerativeAI(
                 model="gemini-3.8-flash",
                 google_api_key=google_key,
                 temperature=temperature,
-                max_retries=1,
+                max_retries=0,
+                timeout=10.0,
             )
         )
 
