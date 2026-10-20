@@ -1,4 +1,5 @@
-﻿from typing import Optional
+from typing import Optional
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +29,13 @@ class Settings(BaseSettings):
     # Hard token-saving safety caps
     MAX_TREE_FILES: int = 350
     MAX_FILE_WINDOW_LINES: int = 150
+
+    @field_validator("GROQ_API_KEY", "GOOGLE_API_KEY", "GITHUB_TOKEN", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
     model_config = SettingsConfigDict(
         env_file=".env",

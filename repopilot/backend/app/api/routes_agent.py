@@ -31,6 +31,11 @@ async def solve_issue_stream(
     2. Executes LangChain Tool-Calling Agent and streams live Server-Sent Events (SSE).
     3. Guarantees safe stream termination without dropping connection.
     """
+    if x_user_groq_key:
+        x_user_groq_key = x_user_groq_key.strip()
+    if x_user_google_key:
+        x_user_google_key = x_user_google_key.strip()
+
     current_user = verify_user_session(authorization, x_user_email)
     if settings.REQUIRE_AUTH_FOR_SCANS and not current_user:
         raise HTTPException(

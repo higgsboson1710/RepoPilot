@@ -1,4 +1,4 @@
-﻿from typing import Any, List, Optional, Type
+from typing import Any, List, Optional, Type
 from pydantic import BaseModel
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import PydanticOutputParser
@@ -14,8 +14,10 @@ def get_candidate_llms(
     user_groq_key: Optional[str] = None,
     user_google_key: Optional[str] = None,
 ) -> List[BaseChatModel]:
-    groq_key = user_groq_key or settings.GROQ_API_KEY
-    google_key = user_google_key or settings.GOOGLE_API_KEY
+    raw_groq = user_groq_key or settings.GROQ_API_KEY
+    raw_google = user_google_key or settings.GOOGLE_API_KEY
+    groq_key = raw_groq.strip() if raw_groq else ""
+    google_key = raw_google.strip() if raw_google else "" 
 
     models: List[BaseChatModel] = []
 

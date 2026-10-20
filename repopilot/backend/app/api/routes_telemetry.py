@@ -41,10 +41,11 @@ async def test_groq():
     except Exception as e:
         results['groq_http_error'] = f'{type(e).__name__}: {e}'
 
-    if settings.GROQ_API_KEY:
+    clean_groq_key = settings.GROQ_API_KEY.strip() if settings.GROQ_API_KEY else ''
+    if clean_groq_key:
         try:
             from langchain_groq import ChatGroq
-            cg = ChatGroq(model='openai/gpt-oss-120b', api_key=settings.GROQ_API_KEY, timeout=15)
+            cg = ChatGroq(model='openai/gpt-oss-120b', api_key=clean_groq_key, timeout=15)
             ans = await cg.ainvoke('test ping')
             results['chatgroq_ping'] = ans.content[:40]
         except Exception as e:
