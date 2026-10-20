@@ -52,8 +52,16 @@ async def solve_issue_stream(
             yield f"data: {json.dumps({'type': 'status', 'message': f'Initializing agent on {owner}/{repo}...'})}\n\n"
 
             # Emit immediate step 1 so UI terminal starts streaming live right away
+            commit_prefix = str(overview.get("latest_commit_sha", "HEAD"))[:8]
             sample_files = "\n".join(clean_tree[:8])
-            yield f"data: {json.dumps({'type': 'tool_step', 'step_number': 1, 'tool': 'search_files_in_tree', 'input': {'keyword': payload.query[:35]}, 'preview': f'Scanning {len(clean_tree)} repository files at commit {overview.get("latest_commit_sha", "HEAD")[:8]}:\n{sample_files}'})}\n\n"
+            step_1_payload = {
+                "type": "tool_step",
+                "step_number": 1,
+                "tool": "search_files_in_tree",
+                "input": {"keyword": payload.query[:35]},
+                "preview": f"Scanning {len(clean_tree)} repository files at commit {commit_prefix}:\n{sample_files}",
+            }
+            yield f"data: {json.dumps(step_1_payload)}\n\n"
 
             result = await run_issue_solver_agent(
                 owner=owner,
