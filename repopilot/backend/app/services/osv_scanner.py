@@ -123,7 +123,7 @@ class DependencyAndCVEScanner:
             for dep in dependencies
         ]
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
             try:
                 resp = await client.post(OSV_BATCH_URL, json={"queries": queries})
                 if resp.status_code != 200:

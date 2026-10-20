@@ -68,7 +68,7 @@ class GitHubClient:
 
     async def get_repo_overview(self, owner: str, repo: str) -> Dict[str, Any]:
         """Fetches core metadata, default branch, latest commit SHA, and language breakdown."""
-        async with httpx.AsyncClient(headers=self.headers, timeout=20.0) as client:
+        async with httpx.AsyncClient(headers=self.headers, timeout=20.0, follow_redirects=True) as client:
             repo_resp = await client.get(f"{self.BASE_URL}/repos/{owner}/{repo}")
             repo_resp.raise_for_status()
             repo_data = repo_resp.json()
@@ -105,7 +105,7 @@ class GitHubClient:
     ) -> List[str]:
         """Fetches the entire recursive repository file tree and strips all non-code noise."""
         url = f"{self.BASE_URL}/repos/{owner}/{repo}/git/trees/{branch_or_sha}?recursive=1"
-        async with httpx.AsyncClient(headers=self.headers, timeout=25.0) as client:
+        async with httpx.AsyncClient(headers=self.headers, timeout=25.0, follow_redirects=True) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             tree_items = resp.json().get("tree", [])
@@ -125,7 +125,7 @@ class GitHubClient:
         """Fetches and decodes a UTF-8 file from the repository. Returns None if not found."""
         url = f"{self.BASE_URL}/repos/{owner}/{repo}/contents/{filepath.lstrip('/')}"
         params = {"ref": ref} if ref else {}
-        async with httpx.AsyncClient(headers=self.headers, timeout=20.0) as client:
+        async with httpx.AsyncClient(headers=self.headers, timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(url, params=params)
             if resp.status_code != 200:
                 return None
@@ -171,7 +171,7 @@ class GitHubClient:
         """Fetches open issues (excluding Pull Requests) for the Issue-to-PR Agent."""
         url = f"{self.BASE_URL}/repos/{owner}/{repo}/issues"
         params = {"state": "open", "per_page": min(limit * 2, 50)}
-        async with httpx.AsyncClient(headers=self.headers, timeout=20.0) as client:
+        async with httpx.AsyncClient(headers=self.headers, timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
             items = resp.json()
@@ -200,7 +200,7 @@ class GitHubClient:
         self, owner: str, repo: str, issue_number: int
     ) -> Dict[str, Any]:
         """Fetches a specific issue and up to 8 maintainer/community comments."""
-        async with httpx.AsyncClient(headers=self.headers, timeout=20.0) as client:
+        async with httpx.AsyncClient(headers=self.headers, timeout=20.0, follow_redirects=True) as client:
             issue_resp = await client.get(
                 f"{self.BASE_URL}/repos/{owner}/{repo}/issues/{issue_number}"
             )
