@@ -565,9 +565,20 @@ function renderEngineeringReport(reportText) {
 
 export default function App() {
   // Backend & API Configuration State
-  const [apiBaseUrl, setApiBaseUrl] = useState(
-    import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
-  );
+  const [apiBaseUrl, setApiBaseUrl] = useState(() => {
+    try {
+      const saved = localStorage.getItem('repopilot_api_base_url');
+      if (saved && !saved.includes('localhost:8000')) return saved;
+    } catch (_) {}
+    if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL;
+    if (
+      typeof window !== 'undefined' &&
+      (window.location.hostname.includes('onrender.com') || window.location.protocol === 'https:')
+    ) {
+      return 'https://repopilot-backend-84on.onrender.com/api/v1';
+    }
+    return 'http://localhost:8000/api/v1';
+  });
   const [backendStatus, setBackendStatus] = useState('checking'); // 'online' | 'demo' | 'checking'
   const [keyMode, setKeyMode] = useState('server'); // 'server' (default free tier) | 'custom' (optional personal key)
   const [userGroqKey, setUserGroqKey] = useState('');
@@ -1453,7 +1464,7 @@ export default function App() {
                 }`}
               />
               <span className="text-[11px] text-zinc-200 hidden md:inline">
-                {backendStatus === 'online' ? 'API :8000' : 'PREVIEW'}
+                {backendStatus === 'online' ? (apiBaseUrl.includes('localhost') ? 'API :8000' : 'API LIVE') : 'PREVIEW'}
               </span>
             </button>
 
